@@ -4,8 +4,8 @@ from flask import Flask, render_template, request, flash, redirect, session, g
 from flask_debugtoolbar import DebugToolbarExtension
 from sqlalchemy.exc import IntegrityError
 
-from forms import UserAddForm, LoginForm, MessageForm
-from models import db, connect_db, User, Message
+from forms import UserAddForm, LoginForm, MessageForm, UserEditForm
+from models import db, connect_db, User, Message, Follows
 
 CURR_USER_KEY = "curr_user"
 
@@ -51,7 +51,7 @@ def do_logout():
 
     if CURR_USER_KEY in session:
         del session[CURR_USER_KEY]
-
+        flash('You have successfully signed out!')
 
 @app.route('/signup', methods=["GET", "POST"])
 def signup():
@@ -112,6 +112,8 @@ def login():
 @app.route('/logout')
 def logout():
     """Handle logout of user."""
+    do_logout()
+    return redirect('/login')
 
     # IMPLEMENT THIS
 
@@ -206,13 +208,28 @@ def stop_following(follow_id):
 
     return redirect(f"/users/{g.user.id}/following")
 
-
-@app.route('/users/profile', methods=["GET", "POST"])
-def profile():
+# ! FORM IS SHOWING HASHED PASSWORD ---------------------------------
+# TODO: FIX THIS!!
+@app.route('/users/profile/<int:user_id>', methods=["GET", "POST"])
+def profile(user_id):
     """Update profile for current user."""
-
-    # IMPLEMENT THIS
-
+    
+    user = User.query.get_or_404(user_id)
+    form = UserEditForm(obj=user)
+    
+    if form.validate_on_submit():
+        user.username = form.username.data
+        user.email = form.email.data
+        user.image_url = form.image_url.data
+        user.header_image_url = form.header_image_url.data
+        user.bio = form.bio.data
+        user.password = form.password.data
+        db.session.commit()
+        flash(f"{user.username} has been updated")
+        return redirect('/')
+    else:
+        return render_template("users/edit.html", form=form)
+# ! ----------------------------------------------------------------
 
 @app.route('/users/delete', methods=["POST"])
 def delete_user():
@@ -292,11 +309,17 @@ def homepage():
     """
 
     if g.user:
+        # messages = (Message
+        #             .query
+        #             .order_by(Message.timestamp.desc())
+        #             .limit(100)
+        #             .all())
+        
         messages = (Message
                     .query
-                    .order_by(Message.timestamp.desc())
-                    .limit(100)
-                    .all())
+                    .join(User, Message.user_id == User.id)
+                    .filter((User.id == g.user.id) | (User.id.in_(Follows.query.filter_by(user_following_id=g.user.id).values('user_being_followed_id'))))
+                    .order_by(Message.timestamp.desc()))
 
         return render_template('home.html', messages=messages)
 
